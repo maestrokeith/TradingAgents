@@ -35,6 +35,25 @@ def test_rejects_missing_stop():
     assert not decision.approved
 
 
+def test_rejects_invalid_buy_stop_direction():
+    decision = RiskEngine().evaluate(signal(stop_loss=Decimal("101")), Decimal("10000"))
+    assert not decision.approved
+
+
+def test_rejects_invalid_sell_stop_direction():
+    decision = RiskEngine().evaluate(
+        signal(side=Side.SELL, stop_loss=Decimal("99")), Decimal("10000")
+    )
+    assert not decision.approved
+
+
+def test_accepts_valid_sell_stop_direction():
+    decision = RiskEngine().evaluate(
+        signal(side=Side.SELL, stop_loss=Decimal("101")), Decimal("10000")
+    )
+    assert decision.approved
+
+
 def test_rejects_daily_loss_breach():
     decision = RiskEngine().evaluate(
         signal(), Decimal("10000"), realized_daily_pnl=Decimal("-300")
@@ -48,6 +67,6 @@ def test_flat_is_safe_noop():
     assert decision.max_quantity == 0
 
 
-def test_limits_are_validated():
+def test_limits_are_validated_with_slots():
     with pytest.raises(ValueError):
         RiskLimits(max_trade_risk_fraction=Decimal("1.1"))
