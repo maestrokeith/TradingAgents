@@ -41,9 +41,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install .
-          # Catches undeclared runtime deps (e.g. #994 python-dotenv): a bare
-          # install must import the package and the CLI module.
-          python -c "import tradingagents, cli.main; print('clean-install import OK')"
+          python -c "import aura, tradingagents, cli.main; print('clean-install import OK')"
 
   lint:
     name: ruff (strict, full repo)
@@ -56,6 +54,17 @@ jobs:
       - name: Install ruff
         run: pip install "ruff>=0.15"
       - name: Lint the repository
-        # The repo is fully clean under the strict select, so we lint everything
-        # (results/ and worklog/ are excluded via pyproject extend-exclude).
         run: ruff check .
+
+  dependency-audit:
+    name: dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install pip-audit
+        run: pip install "pip-audit>=2.7"
+      - name: Audit declared dependencies
+        run: pip-audit --project .
