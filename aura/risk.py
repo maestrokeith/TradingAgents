@@ -21,7 +21,13 @@ class RiskLimits:
     max_daily_loss_fraction: Decimal = Decimal("0.03")
 
     def __post_init__(self) -> None:
-        for name, value in vars(self).items():
+        for name, value in (
+            ("max_position_fraction", self.max_position_fraction),
+            ("max_trade_risk_fraction", self.max_trade_risk_fraction),
+            ("min_confidence", self.min_confidence),
+            ("min_stop_distance_fraction", self.min_stop_distance_fraction),
+            ("max_daily_loss_fraction", self.max_daily_loss_fraction),
+        ):
             if not Decimal("0") <= value <= Decimal("1"):
                 raise ValueError(f"{name} must be between 0 and 1")
 
@@ -49,6 +55,11 @@ class RiskEngine:
         if signal.stop_loss is None:
             return RiskDecision(False, "stop loss is required")
 
+        if signal.side is Side.BUY and signal.stop_loss >= signal.price:
+            return RiskDecision(False, "buy stop loss must be below entry price")
+        if signal.side is Side.SELL and signal.stop_loss <= signal.price:
+            return RiskDecision(False, "sell stop loss must be above entry price")
+
         stop_distance = abs(signal.price - signal.stop_loss) / signal.price
         if stop_distance < self.limits.min_stop_distance_fraction:
             return RiskDecision(False, "stop distance below hard minimum")
@@ -62,4 +73,9 @@ class RiskEngine:
         if quantity <= 0:
             return RiskDecision(False, "computed quantity is zero")
 
-        return RiskDecision(True, "approved by deterministic risk gate", quantity, risk_per_unit * quantity)
+        return RiskDecision(
+            True,
+            "approved by deterministic risk gate",
+            quantity,
+            risk_per_unit * quantity,
+        )
