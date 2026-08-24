@@ -1,0 +1,80 @@
+//@version=6
+indicator("AURA-GOLD Research Scanner", overlay=true, max_labels_count=500)
+
+// Research-only XAUUSD scanner. It produces analytical observations and
+// webhook-ready messages. It does NOT place orders or connect to a broker.
+
+htf = input.timeframe("60", "Higher timeframe")
+ltf = input.timeframe("5", "Execution/research timeframe")
+emaFastLen = input.int(20, "Fast EMA", minval=2)
+emaSlowLen = input.int(50, "Slow EMA", minval=3)
+rsiLen = input.int(14, "RSI length", minval=2)
+atrLen = input.int(14, "ATR length", minval=2)
+sweepLookback = input.int(20, "Liquidity lookback", minval=5)
+scoreThreshold = input.int(75, "Research score threshold", minval=0, maxval=100)
+showLevels = input.bool(true, "Show research levels")
+
+// Higher-timeframe context.
+htfClose = request.security(syminfo.tickerid, htf, close, barmerge.gaps_off, barmerge.lookahead_off)
+htfFast = request.security(syminfo.tickerid, htf, ta.ema(close, emaFastLen), barmerge.gaps_off, barmerge.lookahead_off)
+htfSlow = request.security(syminfo.tickerid, htf, ta.ema(close, emaSlowLen), barmerge.gaps_off, barmerge.lookahead_off)
+htfBull = htfClose > htfFast and htfFast > htfSlow
+htfBear = htfClose < htfFast and htfFast < htfSlow
+
+emaFast = ta.ema(close, emaFastLen)
+emaSlow = ta.ema(close, emaSlowLen)
+rsi = ta.rsi(close, rsiLen)
+atr = ta.atr(atrLen)
+atrPct = close != 0 ? atr / close * 100.0 : 0.0
+
+prevHigh = ta.highest(high[1], sweepLookback)
+prevLow = ta.lowest(low[1], sweepLookback)
+
+// Liquidity sweep: price trades beyond a recent extreme and closes back inside.
+bullSweep = low < prevLow and close > prevLow
+bearSweep = high > prevHigh and close < prevHigh
+
+// Displacement / structure confirmation.
+bullDisplacement = close > high[1] and close > emaFast
+bearDisplacement = close < low[1] and close < emaFast
+
+// Momentum confirmation.
+bullMomentum = rsi > 50
+bearMomentum = rsi < 50
+
+// Session context in exchange timezone. This is deliberately descriptive, not a trade filter.
+inLondon = not na(time(timeframe.period, "0700-1000"))
+inNewYork = not na(time(timeframe.period, "1300-1600"))
+sessionScore = inLondon or inNewYork ? 5 : 0
+
+// Volatility sanity: avoid treating extreme ATR as a normal regime.
+volatilityScore = atrPct > 0.03 and atrPct < 1.00 ? 5 : 0
+
+longScore = (htfBull ? 25 : 0) + (bullSweep ? 20 : 0) + (bullDisplacement ? 20 : 0) + (bullMomentum ? 10 : 0) + sessionScore + volatilityScore
+shortScore = (htfBear ? 25 : 0) + (bearSweep ? 20 : 0) + (bearDisplacement ? 20 : 0) + (bearMomentum ? 10 : 0) + sessionScore + volatilityScore
+
+longObservation = longScore >= scoreThreshold
+shortObservation = shortScore >= scoreThreshold
+
+plot(emaFast, "Fast EMA")
+plot(emaSlow, "Slow EMA")
+
+plotshape(longObservation, title="Long research observation", style=shape.triangleup, location=location.belowbar, size=size.tiny, text="R-L")
+plotshape(shortObservation, title="Short research observation", style=shape.triangledown, location=location.abovebar, size=size.tiny, text="R-S")
+
+researchHigh = ta.highest(high, sweepLookback)
+researchLow = ta.lowest(low, sweepLookback)
+plot(showLevels ? researchHigh : na, "Research high")
+plot(showLevels ? researchLow : na, "Research low")
+
+jsonMessage(string direction, int score) =>
+    '{"mode":"research","symbol":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","direction":"' + direction + '","score":' + str.tostring(score) + ',"price":' + str.tostring(close) + ',"rsi":' + str.tostring(rsi) + ',"atr":' + str.tostring(atr) + ',"htf_bull":' + str.tostring(htfBull) + ',"htf_bear":' + str.tostring(htfBear) + ',"bull_sweep":' + str.tostring(bullSweep) + ',"bear_sweep":' + str.tostring(bearSweep) + ',"session_london":' + str.tostring(inLondon) + ',"session_new_york":' + str.tostring(inNewYork) + '}'
+
+if barstate.isconfirmed and longObservation
+    alert(jsonMessage("LONG_OBSERVATION", longScore), alert.freq_once_per_bar_close)
+
+if barstate.isconfirmed and shortObservation
+    alert(jsonMessage("SHORT_OBSERVATION", shortScore), alert.freq_once_per_bar_close)
+
+alertcondition(longObservation, "Long research observation", "AURA-GOLD research observation")
+alertcondition(shortObservation, "Short research observation", "AURA-GOLD research observation")
